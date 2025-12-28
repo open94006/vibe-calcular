@@ -21,13 +21,11 @@ jobs:
           key: ${{ secrets.GCP_SSH_KEY }}
           port: 22
           script: |
-            set -e
-
             cd ~/vibe-calcular
 
             git fetch origin
             git reset --hard origin/main
 
-            docker compose up -d --build
+            docker compose -f docker-compose.caddy.prod.yml up -d --build
 
             docker image prune -f
