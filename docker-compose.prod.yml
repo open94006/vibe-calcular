@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: my_server
+    restart: unless-stopped
+    ports:
+      - "5100:5100"
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: my_client
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - server

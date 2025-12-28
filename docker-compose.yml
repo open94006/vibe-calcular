@@ -1,18 +1,40 @@
 version: "3.8"
 
+volumes:
+  server_node_modules:
+  client_node_modules:
+
 services:
   server:
-    build: ./server
+    image: node:20-alpine
     container_name: my_server
-    restart: always
+    working_dir: /app
+    restart: unless-stopped
+    volumes:
+      - ./server:/app
+      - server_node_modules:/app/node_modules
+    environment:
+      # Improve file watching reliability on Windows/macOS Docker Desktop
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=200
     ports:
-      - "3000:3000"
+      - "5100:5100"
+    command: sh -c "npm install && npm run dev"
 
   client:
-    build: ./client
+    image: node:20-alpine
     container_name: my_client
-    restart: always
-    ports:
-      - "80:80"
+    working_dir: /app
+    restart: unless-stopped
     depends_on:
       - server
+    volumes:
+      - ./client:/app
+      - client_node_modules:/app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=200
+    ports:
+      - "5173:5173"
+    # Vite must bind to 0.0.0.0 inside container, otherwise host can't access it
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
