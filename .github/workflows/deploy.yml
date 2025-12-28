@@ -23,7 +23,7 @@ jobs:
           script: |
             set -e
 
-            cd ~/你的專案名稱
+            cd ~/apps
 
             git fetch origin
             git reset --hard origin/main
