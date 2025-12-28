@@ -1,0 +1,1 @@
+gcloud compute ssh --project="gen-lang-client-0017766570" --zone="asia-east1-a" "daniel-vibe-project"
