@@ -1,39 +1,26 @@
-# 階段一：編譯前端 React
-FROM node:20 AS client-builder
-WORKDIR /app/client
-COPY client/package*.json ./
-RUN npm install
-COPY client/ ./
-RUN npm run build
-
-# 階段二：編譯後端 TypeScript
-FROM node:20 AS server-builder
-WORKDIR /app/server
-COPY server/package*.json ./
-RUN npm install
-COPY server/ ./
-RUN npm run build 
+# ... (前兩個階段不變)
 
 # 階段三：最終執行環境
 FROM node:20-slim
 WORKDIR /app
 
-# 複製後端 package.json 並安裝 production 依賴
+# 複製 package.json
 COPY server/package*.json ./
 RUN npm install --production
 
-# 複製後端編譯好的 JS 檔案 (從 server/dist 複製到 /app/dist)
+# 複製後端編譯後的檔案
 COPY --from=server-builder /app/server/dist ./dist
 
-# 複製前端編譯好的檔案到後端預期的 public 目錄
-# 由於執行的是 dist/index.js，且為了確保路徑一致性，我們將前端產物放在 dist/public
+# 複製前端檔案 (確保它在 dist 裡面)
 COPY --from=client-builder /app/client/dist ./dist/public
 
+# 設定環境變數
 ENV NODE_ENV=production
-# Cloud Run 需要使用 PORT 環境變數
-ENV PORT=8080
-EXPOSE 8080
+# 這裡不需要 EXPOSE 8080，Cloud Run 會處理，但寫著也沒關係
 
-# 執行編譯後的 JS
-# 使用 npm start 或直接呼叫 node
+# 增加一個啟動檢查 (Debug 用)
+RUN ls -R /app/dist 
+
+# 直接執行，並確保路徑對應到你編譯後的進入點
+# 如果你的 index.ts 在 src 下，編譯後可能是 dist/src/index.js
 CMD ["node", "dist/index.js"]
