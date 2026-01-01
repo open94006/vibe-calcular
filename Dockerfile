@@ -26,13 +26,14 @@ RUN npm install --production
 COPY --from=server-builder /app/server/dist ./dist
 
 # 複製前端編譯好的檔案到後端預期的 public 目錄
-# 根據 server/src/index.ts，它會尋找 __dirname/public
-# 由於執行的是 dist/index.js，所以 public 應該放在 dist/public
+# 由於執行的是 dist/index.js，且為了確保路徑一致性，我們將前端產物放在 dist/public
 COPY --from=client-builder /app/client/dist ./dist/public
 
 ENV NODE_ENV=production
-# Cloud Run 會提供 PORT 環境變數，程式內已處理預設 8080
+# Cloud Run 需要使用 PORT 環境變數
+ENV PORT=8080
 EXPOSE 8080
 
 # 執行編譯後的 JS
+# 使用 npm start 或直接呼叫 node
 CMD ["node", "dist/index.js"]
