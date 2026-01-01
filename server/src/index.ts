@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import productRoute from './routes/product.route';
+import productRoute from './routes/product.route.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
