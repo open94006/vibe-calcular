@@ -36,7 +36,7 @@ app.use('/api/product', productRoute);
 
 // 服務前端靜態檔案 (選配，確保 Cloud Run 能正確服務前端)
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('*', (req, res, next) => {
+app.get(/.*/, (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
