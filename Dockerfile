@@ -13,18 +13,26 @@ COPY server/package*.json ./
 RUN npm install
 COPY server/ ./
 RUN npm run build 
-# 註：這會產生 dist 資料夾，內含編譯後的 JS
 
 # 階段三：最終執行環境
 FROM node:20-slim
 WORKDIR /app
+
+# 複製後端 package.json 並安裝 production 依賴
 COPY server/package*.json ./
 RUN npm install --production
-# 複製後端編譯好的檔案
-COPY --from=server-builder /app/server/dist ./
-# 複製前端編譯好的檔案到後端指定的 public 目錄
-COPY --from=client-builder /app/client/dist ./public
+
+# 複製後端編譯好的 JS 檔案 (從 server/dist 複製到 /app/dist)
+COPY --from=server-builder /app/server/dist ./dist
+
+# 複製前端編譯好的檔案到後端預期的 public 目錄
+# 根據 server/src/index.ts，它會尋找 __dirname/public
+# 由於執行的是 dist/index.js，所以 public 應該放在 dist/public
+COPY --from=client-builder /app/client/dist ./dist/public
 
 ENV NODE_ENV=production
-# 這裡不需要 EXPOSE 5100，Cloud Run 會接管
-CMD ["node", "index.js"]
+# Cloud Run 會提供 PORT 環境變數，程式內已處理預設 8080
+EXPOSE 8080
+
+# 執行編譯後的 JS
+CMD ["node", "dist/index.js"]
