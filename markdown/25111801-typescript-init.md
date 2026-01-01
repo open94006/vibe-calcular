@@ -1,12 +1,10 @@
 # Typescript Init
 
 標籤: Node.js
-建立時間: 2025年4月19日 下午12:37
+建立時間: 2025 年 4 月 19 日 下午 12:37
 
-- 關鍵字
-    
+-   關鍵字
     brew, pnpm, vite, cors
-    
 
 ## 1. 基本配置與安裝
 
@@ -51,7 +49,7 @@ pnpm init
 
 // 安裝套件 tsx, express, cors
 pnpm add -D tsx
-pnpm add -D express @types/express  
+pnpm add -D express @types/express
 pnpm add -D cors @types/cors
 
 // 初始化 tsconfig.json
@@ -62,14 +60,14 @@ tsc --init
 
 ```json
 {
-  "compilerOptions": {
-    "module": "ESNext",
-    "target": "ESNext",
-    "outDir": "dist",
-    "rootDir": "src",
-    "strict": true,
-    "esModuleInterop": true
-  }
+    "compilerOptions": {
+        "module": "ESNext",
+        "target": "ESNext",
+        "outDir": "dist",
+        "rootDir": "src",
+        "strict": true,
+        "esModuleInterop": true
+    }
 }
 ```
 
@@ -93,7 +91,7 @@ const app = express();
 const PORT = 5100;
 
 const corsOptions = {
-    origin: 'http://localhost:5173',
+    origin: 'http://localhost:8080',
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
@@ -103,13 +101,12 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 app.get('/api/hello', (req, res) => {
-  res.json({ message: 'Hello from Express + TS backend!' });
+    res.json({ message: 'Hello from Express + TS backend!' });
 });
 
 app.listen(PORT, () => {
-  console.log(`Server is running at http://localhost:${PORT}`);
+    console.log(`Server is running at http://localhost:${PORT}`);
 });
-
 ```
 
 ## 6. 編輯 client/src/App.tsx
@@ -118,31 +115,30 @@ app.listen(PORT, () => {
 import { useEffect, useState } from 'react';
 
 function App() {
-  const [message, setMessage] = useState('載入中');
+    const [message, setMessage] = useState('載入中');
 
-	// 可以看到兩秒鐘後從「載入中」變化成後端回傳的文字
-  useEffect(() => {
-    setTimeout(() => {
-      fetch('http://localhost:5100/api/hello')
-      .then((res) => {
-        return res.json()
-      })
-      .then((data) => {
-        return setMessage(data.message)
-      });
-    }, 2000);
-  }, []);
+    // 可以看到兩秒鐘後從「載入中」變化成後端回傳的文字
+    useEffect(() => {
+        setTimeout(() => {
+            fetch('http://localhost:5100/api/hello')
+                .then((res) => {
+                    return res.json();
+                })
+                .then((data) => {
+                    return setMessage(data.message);
+                });
+        }, 2000);
+    }, []);
 
-  return (
-    <div>
-      <h1>React + Express + TS</h1>
-      <p>{message}</p>
-    </div>
-  );
+    return (
+        <div>
+            <h1>React + Express + TS</h1>
+            <p>{message}</p>
+        </div>
+    );
 }
 
 export default App;
-
 ```
 
 最後更新根目錄 package.json 的 script
@@ -158,8 +154,8 @@ export default App;
 
 ```bash
 // 終端機 1
-npm run client 
+npm run client
 
 // 終端機 2
-npm run server 
+npm run server
 ```

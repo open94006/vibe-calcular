@@ -35,6 +35,6 @@ services:
       - CHOKIDAR_USEPOLLING=true
       - CHOKIDAR_INTERVAL=200
     ports:
-      - "5173:5173"
+      - "8080:8080"
     # Vite must bind to 0.0.0.0 inside container, otherwise host can't access it
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 8080"
