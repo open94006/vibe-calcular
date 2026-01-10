@@ -1,14 +1,17 @@
 {
-  "compilerOptions": {
-    "module": "NodeNext",
-    "target": "ESNext",
-    "outDir": "dist",
-    "rootDir": "src",
-    "strict": true,
-    "esModuleInterop": true,
-    "moduleResolution": "NodeNext",
-    "skipLibCheck": true
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules"]
+    "compilerOptions": {
+        "module": "NodeNext",
+        "target": "ESNext",
+        "outDir": "dist",
+        "rootDir": "src",
+        "strict": true,
+        "esModuleInterop": true,
+        "moduleResolution": "NodeNext",
+        "skipLibCheck": true,
+        "experimentalDecorators": true,
+        "emitDecoratorMetadata": true,
+        "allowJs": true
+    },
+    "include": ["src/**/*"],
+    "exclude": ["node_modules"]
 }
