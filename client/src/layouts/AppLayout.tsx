@@ -45,7 +45,7 @@ const SidebarContent: React.FC<{
   setIsSidebarOpen: (isOpen: boolean) => void;
 }> = ({ location, isDesktopSidebarCollapsed, setIsSidebarOpen }) => (
   <>
-    <div className="flex items-center p-4 h-16 border-b border-gray-700 bg-gray-900 transition-colors duration-300">
+    <div className="flex items-center p-4 h-12 border-b border-gray-700 bg-gray-900 transition-colors duration-300">
       <div
         className={clsx(
           "flex items-center space-x-2 transition-all duration-300",
@@ -214,7 +214,7 @@ const AppLayout: React.FC = () => {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="bg-white dark:bg-gray-800 shadow-sm z-10 h-12 md:h-16 flex items-center justify-between px-4 md:px-6 border-b border-gray-200 dark:border-gray-700 sticky top-0 transition-colors duration-300">
+        <header className="bg-white dark:bg-gray-800 shadow-sm z-10 h-12 md:h-12 flex items-center justify-between px-4 md:px-6 border-b border-gray-200 dark:border-gray-700 sticky top-0 transition-colors duration-300">
           <div className="flex items-center">
             <button
               onClick={toggleSidebar}
