@@ -13,7 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const allowedOrigins = new Set(
-    ['https://vibe-calculator-810458374554.asia-east1.run.app', 'http://localhost:5173', 'http://z-running.com', 'https://z-running.com', process.env.CORS_ORIGIN].filter(Boolean),
+    ['https://z-running-810458374554.asia-east1.run.app', 'http://localhost:5173', 'http://z-running.com', 'https://z-running.com', process.env.CORS_ORIGIN].filter(Boolean),
 );
 
 const corsOptions: cors.CorsOptions = {
