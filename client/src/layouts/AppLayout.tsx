@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Menu, X, Dumbbell, Activity, Trophy } from "lucide-react";
+import { Menu, X, Dumbbell, Activity, Trophy, Cloud } from "lucide-react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import clsx from "clsx";
 import ThemeToggle from "../components/ThemeToggle";
@@ -33,6 +33,7 @@ const ShuttlecockIcon = ({
 );
 
 const NAV_ITEMS = [
+  { name: "天氣查詢", path: "/weather", icon: Cloud },
   { name: "馬拉松配速換算", path: "/running", icon: Activity },
   { name: "磅-公斤換算", path: "/weight", icon: Dumbbell },
   { name: "公里-英里換算", path: "/pitching", icon: Trophy },

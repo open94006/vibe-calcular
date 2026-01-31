@@ -1,17 +1,19 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import productRoute from './routes/product.route.js';
+import weatherRoute from './routes/weather.route.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { renderHTMLWithSEO, defaultSEO } from './services/seo.service.js';
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 5100;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const allowedOrigins = new Set(
-    ['https://vibe-calculator-810458374554.asia-east1.run.app', 'http://localhost:5173', 'http://z-running.com', 'https://z-running.com', process.env.CORS_ORIGIN].filter(Boolean)
+    ['https://vibe-calculator-810458374554.asia-east1.run.app', 'http://localhost:5173', 'http://z-running.com', 'https://z-running.com', process.env.CORS_ORIGIN].filter(Boolean),
 );
 
 const corsOptions: cors.CorsOptions = {
@@ -38,6 +40,7 @@ app.get('/api/seo', (req, res) => {
 });
 
 app.use('/api/product', productRoute);
+app.use('/api/weather', weatherRoute);
 
 // 服務前端靜態檔案 (選配，確保 Cloud Run 能正確服務前端)
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));

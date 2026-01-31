@@ -17,6 +17,8 @@ services:
       # Improve file watching reliability on Windows/macOS Docker Desktop
       - CHOKIDAR_USEPOLLING=true
       - CHOKIDAR_INTERVAL=200
+      - PORT=5100
+      - OPENWEATHER_API_KEY=7d59a38b76215a6203d966e770887cda
     ports:
       - "5100:5100"
     command: sh -c "npm install && npm run dev"

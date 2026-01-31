@@ -5,6 +5,7 @@ import RunningCalculator from "./pages/RunningCalculator";
 import WeightCalculator from "./pages/WeightCalculator";
 import PitchingCalculator from "./pages/PitchingCalculator";
 import BadmintonScoreboard from "./pages/BadmintonScoreboard";
+import WeatherChecker from "./pages/WeatherChecker";
 import { AlertProvider } from "./components/AlertContext";
 
 function App() {
@@ -59,6 +60,7 @@ function App() {
             <Route path="weight" element={<WeightCalculator />} />
             <Route path="pitching" element={<PitchingCalculator />} />
             <Route path="badminton" element={<BadmintonScoreboard />} />
+            <Route path="weather" element={<WeatherChecker />} />
           </Route>
         </Routes>
       </AlertProvider>
