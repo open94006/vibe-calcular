@@ -575,7 +575,7 @@ function WeatherChecker() {
             </div>
 
             {/* 搜尋列 */}
-            <form onSubmit={handleSearchSubmit} className="relative mb-4 lg:mb-5 flex gap-2 z-50 max-w-3xl">
+            <form onSubmit={handleSearchSubmit} className="relative mb-4 lg:mb-5 flex gap-2 z-0 lg:z-50 max-w-3xl">
                 <div className="flex-1 relative">
                     <div className="flex items-center bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3">
                         <input
