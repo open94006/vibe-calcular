@@ -50,10 +50,16 @@ interface LocationInfo {
  */
 class WeatherService {
     private apiKey: string;
+    private googleGeocodeApiKey: string;
+    private openCageApiKey: string;
     private baseUrl: string = 'https://api.openweathermap.org/data/2.5/weather';
     private airQualityUrl: string = 'https://api.openweathermap.org/data/2.5/air_pollution';
     private geoUrl: string = 'http://api.openweathermap.org/geo/1.0/reverse';
     private geoDirectUrl: string = 'http://api.openweathermap.org/geo/1.0/direct';
+    private nominatimUrl: string = 'https://nominatim.openstreetmap.org/search';
+    private nominatimReverseUrl: string = 'https://nominatim.openstreetmap.org/reverse';
+    private googleGeocodeUrl: string = 'https://maps.googleapis.com/maps/api/geocode/json';
+    private openCageGeocodeUrl: string = 'https://api.opencagedata.com/geocode/v1/json';
 
     // 縣市名稱對照表
     private cityMapping: { [key: string]: string } = {
@@ -103,6 +109,8 @@ class WeatherService {
 
     constructor() {
         this.apiKey = process.env.OPENWEATHER_API_KEY || '';
+        this.googleGeocodeApiKey = process.env.GOOGLE_MAPS_API_KEY || '';
+        this.openCageApiKey = process.env.OPENCAGE_API_KEY || '';
         if (!this.apiKey) {
             console.warn('警告: OPENWEATHER_API_KEY 環境變數未設定');
         }
@@ -120,28 +128,24 @@ class WeatherService {
         }
 
         try {
-            // 平行搜尋：全球搜尋 + 台灣限定搜尋
-            const [globalRes, twRes] = await Promise.all([
-                fetch(`${this.geoDirectUrl}?q=${encodeURIComponent(query)}&limit=5&appid=${this.apiKey}`),
+            // 平行搜尋：台灣限定搜尋 + 台灣鄉鎮補強搜尋(Nominatim)
+            const [twRes, twDistrictResults] = await Promise.all([
                 fetch(`${this.geoDirectUrl}?q=${encodeURIComponent(query)},TW&limit=5&appid=${this.apiKey}`),
+                this.searchTaiwanDistrictLocations(query),
             ]);
 
-            if (!globalRes.ok || !twRes.ok) {
-                // 這裡簡化處理，只要其中一個失敗就視為失敗，或者可以容錯
-                // 但通常 API key 有效的話都會成功
-                console.warn('部分 Geocoding API 請求可能失敗');
+            if (!twRes.ok) {
+                console.warn('台灣 Geocoding API 請求可能失敗');
             }
 
-            const globalData = globalRes.ok ? await globalRes.json() : [];
             const twData = twRes.ok ? await twRes.json() : [];
 
             // 合併並去重 (使用 lat,lon 作為 key)
-            // 優先放入 twData
-            const combined = [...twData, ...globalData];
+            const combined = [...twData];
             const uniqueMap = new Map();
             combined.forEach((item) => {
-                // 過濾中國大陸地區 (CN)
-                if (item.country === 'CN') return;
+                // 目前只保留台灣地點
+                if (item.country !== 'TW') return;
 
                 // 簡單去重 key: lat,lon (取到小數點後 2 位避免浮點數誤差)
                 const key = `${item.lat.toFixed(3)},${item.lon.toFixed(3)}`;
@@ -151,15 +155,7 @@ class WeatherService {
             });
 
             const data = Array.from(uniqueMap.values());
-
-            // 排序：台灣 (TW) 優先
-            data.sort((a: any, b: any) => {
-                if (a.country === 'TW' && b.country !== 'TW') return -1;
-                if (a.country !== 'TW' && b.country === 'TW') return 1;
-                return 0;
-            });
-
-            return data.map((item: any) => {
+            const mappedOwmData: LocationInfo[] = data.map((item: any) => {
                 let localName = item.local_names?.['zh_tw'] || item.local_names?.['zh-tw'] || item.local_names?.zh || item.name;
 
                 // 嘗試翻譯英文地名 (針對縣市層級，如果 API 只回傳英文)
@@ -182,12 +178,290 @@ class WeatherService {
                     lon: item.lon,
                 };
             });
+
+            // 合併結果，台灣鄉鎮補強結果優先
+            const merged: LocationInfo[] = [...twDistrictResults, ...mappedOwmData];
+
+            // 去重並排序（台灣優先 + 關鍵字匹配優先）
+            const normalizedQuery = this.normalizeTaiwanText(query);
+            const resultMap = new Map<string, LocationInfo>();
+
+            for (const item of merged) {
+                if (typeof item.lat !== 'number' || typeof item.lon !== 'number') continue;
+                const key = `${item.lat.toFixed(3)},${item.lon.toFixed(3)}`;
+                if (!resultMap.has(key)) {
+                    resultMap.set(key, item);
+                }
+            }
+
+            return Array.from(resultMap.values())
+                .sort((a, b) => {
+                    const aName = this.normalizeTaiwanText(a.name);
+                    const bName = this.normalizeTaiwanText(b.name);
+                    const aState = this.normalizeTaiwanText(a.state || '');
+                    const bState = this.normalizeTaiwanText(b.state || '');
+
+                    const score = (name: string, state: string) => {
+                        if (name === normalizedQuery) return 4;
+                        if (`${state}${name}` === normalizedQuery) return 3;
+                        if (name.startsWith(normalizedQuery)) return 2;
+                        if (`${state}${name}`.includes(normalizedQuery)) return 1;
+                        return 0;
+                    };
+
+                    return score(bName, bState) - score(aName, aState);
+                })
+                .slice(0, 8);
         } catch (error) {
             console.error('搜尋地點錯誤:', error);
             return {
                 error: 'SEARCH_ERROR',
                 message: '搜尋地點失敗，請稍後再試',
             };
+        }
+    }
+
+    /**
+     * 透過 Nominatim 補強台灣鄉鎮地區搜尋
+     */
+    private async searchTaiwanDistrictLocations(query: string): Promise<LocationInfo[]> {
+        // 僅在中文關鍵字時啟用，避免增加無效請求
+        if (!/[\u4e00-\u9fa5]/.test(query)) {
+            return [];
+        }
+
+        try {
+            const searchParams = new URLSearchParams({
+                q: `${query} 台灣`,
+                format: 'jsonv2',
+                addressdetails: '1',
+                limit: '8',
+                countrycodes: 'tw',
+                'accept-language': 'zh-TW',
+            });
+
+            const response = await fetch(`${this.nominatimUrl}?${searchParams.toString()}`, {
+                headers: {
+                    'User-Agent': 'vibe-calculator/1.0 (weather-search)',
+                },
+            });
+
+            if (!response.ok) {
+                return [];
+            }
+
+            const data = (await response.json()) as any[];
+            if (!Array.isArray(data)) return [];
+
+            const normalizedQuery = this.normalizeTaiwanText(query);
+            const resultMap = new Map<string, LocationInfo>();
+
+            for (const item of data) {
+                const lat = parseFloat(item.lat);
+                const lon = parseFloat(item.lon);
+                if (isNaN(lat) || isNaN(lon)) continue;
+
+                const address = item.address || {};
+                const rawName = address.city_district || address.town || address.suburb || address.village || address.municipality || item.name || '';
+
+                const rawCity = address.city || address.county || address.state || '';
+
+                const name = this.normalizeTaiwanText(rawName);
+                const state = this.normalizeTaiwanText(rawCity);
+
+                if (!name) continue;
+
+                const fullName = `${state}${name}`;
+                if (!name.includes(normalizedQuery) && !fullName.includes(normalizedQuery)) {
+                    continue;
+                }
+
+                const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+                if (!resultMap.has(key)) {
+                    resultMap.set(key, {
+                        name,
+                        state: state && state !== name ? state : undefined,
+                        country: 'TW',
+                        lat,
+                        lon,
+                    });
+                }
+            }
+
+            return Array.from(resultMap.values());
+        } catch (error) {
+            console.warn('Nominatim 台灣鄉鎮搜尋失敗，回退 OWM:', error);
+            return [];
+        }
+    }
+
+    private normalizeTaiwanText(text: string): string {
+        return text.trim().replace(/台/g, '臺');
+    }
+
+    private localizeName(name?: string): string {
+        if (!name) return '';
+        const normalized = this.normalizeTaiwanText(name);
+        if (this.cityMapping[normalized]) return this.cityMapping[normalized];
+        if (this.cityMapping[name]) return this.cityMapping[name];
+        return normalized;
+    }
+
+    private buildLocationInfo(name?: string, state?: string): LocationInfo | null {
+        const localizedName = this.localizeName(name);
+        const localizedState = this.localizeName(state);
+
+        if (!localizedName) return null;
+
+        if (localizedState && localizedState === localizedName) {
+            return { name: localizedName };
+        }
+
+        return {
+            name: localizedName,
+            state: localizedState || undefined,
+        };
+    }
+
+    private getAddressComponent(components: any[], targetTypes: string[]): string | undefined {
+        const found = components.find((component) => targetTypes.some((type) => component.types?.includes(type)));
+        return found?.long_name || found?.short_name;
+    }
+
+    /**
+     * Reverse Geocoding: Google Maps Geocoding API
+     */
+    private async getLocationFromGoogle(lat: number, lon: number): Promise<LocationInfo | null> {
+        if (!this.googleGeocodeApiKey) return null;
+
+        try {
+            const params = new URLSearchParams({
+                latlng: `${lat},${lon}`,
+                language: 'zh-TW',
+                region: 'tw',
+                key: this.googleGeocodeApiKey,
+            });
+
+            const response = await fetch(`${this.googleGeocodeUrl}?${params.toString()}`);
+            if (!response.ok) return null;
+
+            const data: any = await response.json();
+            if (data.status !== 'OK' || !Array.isArray(data.results) || data.results.length === 0) {
+                return null;
+            }
+
+            const twResult = data.results.find(
+                (result: any) => Array.isArray(result.address_components) && result.address_components.some((component: any) => component.types?.includes('country') && component.short_name === 'TW'),
+            );
+
+            const result = twResult || data.results[0];
+            const components = result.address_components || [];
+
+            const district =
+                this.getAddressComponent(components, ['administrative_area_level_3']) ||
+                this.getAddressComponent(components, ['sublocality_level_1']) ||
+                this.getAddressComponent(components, ['locality']) ||
+                this.getAddressComponent(components, ['administrative_area_level_2']);
+
+            const city = this.getAddressComponent(components, ['administrative_area_level_1']) || this.getAddressComponent(components, ['administrative_area_level_2']);
+
+            return this.buildLocationInfo(district || city, city);
+        } catch (error) {
+            console.warn('Google Reverse Geocoding 失敗，嘗試下一來源:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Reverse Geocoding: OpenCage Geocoder API
+     */
+    private async getLocationFromOpenCage(lat: number, lon: number): Promise<LocationInfo | null> {
+        if (!this.openCageApiKey) return null;
+
+        try {
+            const params = new URLSearchParams({
+                q: `${lat},${lon}`,
+                key: this.openCageApiKey,
+                language: 'zh-TW',
+                countrycode: 'tw',
+                pretty: '0',
+                no_annotations: '1',
+                limit: '1',
+            });
+
+            const response = await fetch(`${this.openCageGeocodeUrl}?${params.toString()}`);
+            if (!response.ok) return null;
+
+            const data: any = await response.json();
+            if (!Array.isArray(data.results) || data.results.length === 0) {
+                return null;
+            }
+
+            const components = data.results[0].components || {};
+            const district = components.city_district || components.town || components.suburb || components.village || components.municipality;
+            const city = components.city || components.county || components.state;
+
+            return this.buildLocationInfo(district || city, city);
+        } catch (error) {
+            console.warn('OpenCage Reverse Geocoding 失敗，嘗試下一來源:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Reverse Geocoding: Nominatim
+     */
+    private async getLocationFromNominatim(lat: number, lon: number): Promise<LocationInfo | null> {
+        try {
+            const params = new URLSearchParams({
+                lat: String(lat),
+                lon: String(lon),
+                format: 'jsonv2',
+                addressdetails: '1',
+                'accept-language': 'zh-TW',
+            });
+
+            const response = await fetch(`${this.nominatimReverseUrl}?${params.toString()}`, {
+                headers: {
+                    'User-Agent': 'vibe-calculator/1.0 (reverse-geocoding)',
+                },
+            });
+
+            if (!response.ok) return null;
+
+            const data: any = await response.json();
+            const address = data?.address || {};
+            const district = address.city_district || address.town || address.suburb || address.village || address.municipality;
+            const city = address.city || address.county || address.state;
+
+            return this.buildLocationInfo(district || city, city);
+        } catch (error) {
+            console.warn('Nominatim Reverse Geocoding 失敗，嘗試下一來源:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Reverse Geocoding: OpenWeatherMap fallback
+     */
+    private async getLocationFromOwm(lat: number, lon: number): Promise<LocationInfo | null> {
+        try {
+            const url = `${this.geoUrl}?lat=${lat}&lon=${lon}&limit=1&appid=${this.apiKey}`;
+            const response = await fetch(url);
+
+            if (!response.ok) return null;
+
+            const data = await response.json();
+            if (data && data.length > 0) {
+                const result = data[0];
+                const localName = result.local_names?.['zh_tw'] || result.local_names?.['zh-tw'] || result.local_names?.zh || result.name;
+                return this.buildLocationInfo(localName, result.state);
+            }
+
+            return null;
+        } catch (error) {
+            console.error('OWM Reverse Geocoding 錯誤:', error);
+            return null;
         }
     }
 
@@ -395,46 +669,22 @@ class WeatherService {
      * 取得詳細中文地名 (Reverse Geocoding)
      */
     private async getDetailedLocationName(lat: number, lon: number): Promise<LocationInfo | null> {
-        try {
-            const url = `${this.geoUrl}?lat=${lat}&lon=${lon}&limit=1&appid=${this.apiKey}`;
-            const response = await fetch(url);
+        // 優先順序：Google -> OpenCage -> Nominatim -> OWM fallback
+        const providers = [
+            () => this.getLocationFromGoogle(lat, lon),
+            () => this.getLocationFromOpenCage(lat, lon),
+            () => this.getLocationFromNominatim(lat, lon),
+            () => this.getLocationFromOwm(lat, lon),
+        ];
 
-            if (!response.ok) return null;
-
-            const data = await response.json();
-            if (data && data.length > 0) {
-                const result = data[0];
-                // 優先取用繁體中文名稱，若無則用 zh，最後用 name
-                let localName = result.local_names?.['zh_tw'] || result.local_names?.['zh-tw'] || result.local_names?.zh || result.name;
-
-                // 嘗試翻譯英文地名 (針對縣市層級)
-                if (localName && !/[\u4e00-\u9fa5]/.test(localName) && this.cityMapping[localName]) {
-                    localName = this.cityMapping[localName];
-                } else if (result.name && !/[\u4e00-\u9fa5]/.test(localName) && this.cityMapping[result.name]) {
-                    localName = this.cityMapping[result.name];
-                }
-
-                let stateName = result.state;
-                // 嘗試翻譯 State
-                if (stateName && this.cityMapping[stateName]) {
-                    stateName = this.cityMapping[stateName];
-                }
-
-                // 如果 localName 和 stateName 一樣，就只回傳 name，避免重複顯示 (例如：台北市 台北市)
-                if (localName === stateName) {
-                    return { name: localName };
-                }
-
-                return {
-                    name: localName,
-                    state: stateName,
-                };
+        for (const provider of providers) {
+            const result = await provider();
+            if (result?.name) {
+                return result;
             }
-            return null;
-        } catch (error) {
-            console.error('Reverse Geocoding 錯誤:', error);
-            return null;
         }
+
+        return null;
     }
 
     private getAqiDescription(aqi: number): string {
