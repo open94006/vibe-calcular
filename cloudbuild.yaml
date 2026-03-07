@@ -28,7 +28,7 @@ steps:
           - >-
               --labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID,gcb-trigger-id=$_TRIGGER_ID
           - '--region=$_DEPLOY_REGION'
-          - '--set-secrets=OPENWEATHER_API_KEY=OPENWEATHER_API_KEY:latest'
+          - '--set-secrets=OPENWEATHER_API_KEY=OPENWEATHER_API_KEY:latest,CWA_API_KEY=CWA_API_KEY:latest,MOENV_API_KEY=MOENV_API_KEY:latest'
           - '--quiet'
       id: Deploy
       entrypoint: gcloud
