@@ -13,6 +13,13 @@ interface WeatherData {
     feelsLike: number;
     pressure: number;
     visibility: number;
+    precipitationProbability?: number; // 降雨機率 (%)
+    temperatureTrend6h?: Array<{
+        time: string; // ISO 字串
+        temperature: number; // 攝氏
+        icon: string; // OWM icon code
+        description: string;
+    }>;
     timestamp: string;
     source?: string; // 資料來源
     airQuality?: {
@@ -53,6 +60,7 @@ class WeatherService {
     private googleGeocodeApiKey: string;
     private openCageApiKey: string;
     private baseUrl: string = 'https://api.openweathermap.org/data/2.5/weather';
+    private forecastUrl: string = 'https://api.openweathermap.org/data/2.5/forecast';
     private airQualityUrl: string = 'https://api.openweathermap.org/data/2.5/air_pollution';
     private geoUrl: string = 'http://api.openweathermap.org/geo/1.0/reverse';
     private geoDirectUrl: string = 'http://api.openweathermap.org/geo/1.0/direct';
@@ -307,6 +315,50 @@ class WeatherService {
         return normalized;
     }
 
+    /**
+     * 將地名解析為 CWA 36hr 預報可用的縣市名稱
+     */
+    private resolveCwaForecastCityName(input?: string): string | null {
+        if (!input) return null;
+
+        const text = this.normalizeTaiwanText(input);
+        const cityList = [
+            '臺北市',
+            '新北市',
+            '桃園市',
+            '臺中市',
+            '臺南市',
+            '高雄市',
+            '基隆市',
+            '新竹市',
+            '嘉義市',
+            '新竹縣',
+            '苗栗縣',
+            '彰化縣',
+            '南投縣',
+            '雲林縣',
+            '嘉義縣',
+            '屏東縣',
+            '宜蘭縣',
+            '花蓮縣',
+            '臺東縣',
+            '澎湖縣',
+            '金門縣',
+            '連江縣',
+        ];
+
+        const exact = cityList.find((city) => city === text);
+        if (exact) return exact;
+
+        const prefix = cityList.find((city) => text.startsWith(city));
+        if (prefix) return prefix;
+
+        const include = cityList.find((city) => text.includes(city));
+        if (include) return include;
+
+        return null;
+    }
+
     private buildLocationInfo(name?: string, state?: string): LocationInfo | null {
         const localizedName = this.localizeName(name);
         const localizedState = this.localizeName(state);
@@ -550,6 +602,12 @@ class WeatherService {
         const enrichedData = { ...baseData };
         const sources: string[] = ['OpenWeatherMap'];
 
+        // 0. 先取得未來 6 小時氣溫變化（OWM 3 小時預報）
+        const tempTrend6h = await this.getTemperatureTrend6h(lat, lon, baseData.temperature, baseData.icon, baseData.description);
+        if (tempTrend6h.length > 0) {
+            enrichedData.temperatureTrend6h = tempTrend6h;
+        }
+
         // 1. 基礎: 取得詳細地名 (Reverse Geocoding)
         const locInfo = await this.getDetailedLocationName(lat, lon);
         if (locInfo) {
@@ -561,6 +619,12 @@ class WeatherService {
 
         // 2. 判斷是否在台灣
         if (isLocationInTaiwan(lat, lon)) {
+            const forecastCityName =
+                this.resolveCwaForecastCityName(enrichedData.city) ||
+                this.resolveCwaForecastCityName(enrichedData.location) ||
+                this.resolveCwaForecastCityName(locInfo?.state) ||
+                this.resolveCwaForecastCityName(locInfo?.name);
+
             // 優化台灣地名顯示：合併 縣市 + 鄉鎮市區 (例如：台北市 + 信義區 => 台北市信義區)
             if (enrichedData.city && enrichedData.location) {
                 const isChinese = (text: string) => /[\u4e00-\u9fa5]/.test(text);
@@ -574,7 +638,11 @@ class WeatherService {
 
             try {
                 // 平行請求 CWA 和 MOENV
-                const [cwaData, moenvData] = await Promise.all([cwaService.getNearestObservation(lat, lon), moenvService.getNearestAqi(lat, lon)]);
+                const [cwaData, moenvData, cwaRainPoP] = await Promise.all([
+                    cwaService.getNearestObservation(lat, lon),
+                    moenvService.getNearestAqi(lat, lon),
+                    forecastCityName ? cwaService.getRainProbabilityByCity(forecastCityName) : Promise.resolve(null),
+                ]);
 
                 // 整合 CWA 資料
                 if (cwaData) {
@@ -585,6 +653,11 @@ class WeatherService {
                     // enrichedData.description = cwaData.description; // 暫時保留 OWM 描述以配合 Icon
                     enrichedData.feelsLike = cwaData.temperature; // 簡單近似，因為自動站通常沒體感溫度公式
                     sources.push(`中央氣象署(${cwaData.stationName})`);
+                }
+
+                // 整合 CWA 降雨機率
+                if (typeof cwaRainPoP === 'number') {
+                    enrichedData.precipitationProbability = cwaRainPoP;
                 }
 
                 // 整合 MOENV 資料
@@ -629,6 +702,91 @@ class WeatherService {
 
         enrichedData.source = sources.join(', ');
         return enrichedData;
+    }
+
+    /**
+     * 取得未來 6 小時氣溫變化（使用 OWM 3 小時預報）
+     */
+    private async getTemperatureTrend6h(
+        lat: number,
+        lon: number,
+        currentTemp: number,
+        currentIcon: string,
+        currentDescription: string,
+    ): Promise<Array<{ time: string; temperature: number; icon: string; description: string }>> {
+        try {
+            const url = `${this.forecastUrl}?lat=${lat}&lon=${lon}&appid=${this.apiKey}&units=metric&lang=zh_tw`;
+            const response = await fetch(url);
+            if (!response.ok) return [];
+
+            const data: any = await response.json();
+            const list = Array.isArray(data?.list) ? data.list : [];
+            if (list.length === 0 || !Number.isFinite(currentTemp)) return [];
+
+            const now = Date.now();
+            const firstHour = new Date(now);
+            firstHour.setMinutes(0, 0, 0);
+            if (firstHour.getTime() <= now) {
+                firstHour.setHours(firstHour.getHours() + 1);
+            }
+            const firstHourTime = firstHour.getTime();
+
+            const anchors: Array<{ time: number; temperature: number }> = [
+                { time: now, temperature: currentTemp },
+                ...list
+                    .map((item: any) => ({
+                        time: Number(item?.dt) * 1000,
+                        temperature: Number(item?.main?.temp),
+                    }))
+                    .filter((item: { time: number; temperature: number }) => Number.isFinite(item.time) && Number.isFinite(item.temperature) && item.time >= now - 3 * 60 * 60 * 1000)
+                    .sort((a: { time: number; temperature: number }, b: { time: number; temperature: number }) => a.time - b.time),
+            ];
+
+            if (anchors.length === 0) return [];
+
+            const estimateTempAt = (targetTime: number) => {
+                const prev = [...anchors].reverse().find((point) => point.time <= targetTime);
+                const next = anchors.find((point) => point.time >= targetTime);
+
+                if (!prev && next) return next.temperature;
+                if (prev && !next) return prev.temperature;
+                if (!prev || !next) return currentTemp;
+                if (prev.time === next.time) return prev.temperature;
+
+                const ratio = (targetTime - prev.time) / (next.time - prev.time);
+                return prev.temperature + (next.temperature - prev.temperature) * ratio;
+            };
+
+            const findNearestWeather = (targetTime: number) => {
+                const nearest = list
+                    .map((item: any) => ({
+                        time: Number(item?.dt) * 1000,
+                        icon: item?.weather?.[0]?.icon,
+                        description: item?.weather?.[0]?.description,
+                    }))
+                    .filter((item: { time: number; icon?: string; description?: string }) => Number.isFinite(item.time))
+                    .sort((a: { time: number }, b: { time: number }) => Math.abs(a.time - targetTime) - Math.abs(b.time - targetTime))[0];
+
+                return {
+                    icon: nearest?.icon || currentIcon || '01d',
+                    description: nearest?.description || currentDescription || '天氣',
+                };
+            };
+
+            return Array.from({ length: 6 }, (_, index) => {
+                const targetTime = firstHourTime + index * 60 * 60 * 1000;
+                const weather = findNearestWeather(targetTime);
+                return {
+                    time: new Date(targetTime).toISOString(),
+                    temperature: Math.round(estimateTempAt(targetTime)),
+                    icon: weather.icon,
+                    description: weather.description,
+                };
+            });
+        } catch (error) {
+            console.error('未來 6 小時氣溫查詢錯誤:', error);
+            return [];
+        }
     }
 
     private convertMoenvAqiToLevel(aqi: number): number {

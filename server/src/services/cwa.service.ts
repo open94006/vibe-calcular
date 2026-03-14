@@ -44,6 +44,7 @@ export interface CwaWeatherData {
 class CwaService {
     private apiKey: string;
     private baseUrl: string = 'https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0001-001';
+    private forecast36hrUrl: string = 'https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001';
     private cache: CwaStation[] | null = null;
     private lastFetchTime: number = 0;
     private cacheTTL: number = 10 * 60 * 1000; // 10 minutes
@@ -142,6 +143,56 @@ class CwaService {
         }
 
         return null;
+    }
+
+    /**
+     * 取得縣市 36 小時天氣預報中的降雨機率（PoP）
+     */
+    async getRainProbabilityByCity(cityName: string): Promise<number | null> {
+        if (!this.apiKey || !cityName) return null;
+
+        try {
+            const params = new URLSearchParams({
+                Authorization: this.apiKey,
+                format: 'JSON',
+                locationName: cityName,
+                elementName: 'PoP',
+            });
+
+            const response = await fetch(`${this.forecast36hrUrl}?${params.toString()}`);
+            if (!response.ok) {
+                console.warn(`CWA PoP API Error: ${response.status} ${response.statusText}`);
+                return null;
+            }
+
+            const data: any = await response.json();
+            const locations = data?.records?.location;
+            if (!Array.isArray(locations) || locations.length === 0) return null;
+
+            const weatherElements = locations[0]?.weatherElement;
+            if (!Array.isArray(weatherElements)) return null;
+
+            const popElement = weatherElements.find((el: any) => el?.elementName === 'PoP');
+            const times = popElement?.time;
+            if (!Array.isArray(times) || times.length === 0) return null;
+
+            const now = Date.now();
+            const currentSlot = times.find((slot: any) => {
+                const start = new Date(slot?.startTime).getTime();
+                const end = new Date(slot?.endTime).getTime();
+                return Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end;
+            });
+
+            const targetSlot = currentSlot || times[0];
+            const rawValue = targetSlot?.parameter?.parameterName;
+            const parsed = Number(rawValue);
+            if (!Number.isFinite(parsed)) return null;
+
+            return Math.max(0, Math.min(100, Math.round(parsed)));
+        } catch (error) {
+            console.error('CWA 降雨機率查詢錯誤:', error);
+            return null;
+        }
     }
 }
 

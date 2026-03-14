@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAlert } from '../components/AlertContext';
-import { Search, MapPin, Wind, Droplets, Cloud, Activity, ThermometerSun, Eye, Gauge, Zap, Heart, X } from 'lucide-react';
+import { Search, MapPin, Wind, Droplets, Cloud, Activity, ThermometerSun, CloudRain, Gauge, Zap, Heart, X } from 'lucide-react';
 
 interface WeatherData {
     location: string;
@@ -13,6 +13,13 @@ interface WeatherData {
     feelsLike: number;
     pressure: number;
     visibility: number;
+    precipitationProbability?: number;
+    temperatureTrend6h?: Array<{
+        time: string;
+        temperature: number;
+        icon: string;
+        description: string;
+    }>;
     timestamp: string;
     source?: string; // 資料來源
     airQuality?: {
@@ -54,61 +61,153 @@ interface FavoriteLocation {
 }
 
 // 跑步建議等級
-const getRunningCondition = (temp: number, aqi: number | undefined, humidity: number, windSpeed: number) => {
+const getRunningCondition = (temp: number, aqi: number | undefined, pm25: number | undefined, humidity: number, windSpeed: number) => {
     let score = 100;
     const issues: string[] = [];
+    let airQualityHint = '空氣資料不足';
+    const penalties = {
+        temperature: 0,
+        airQuality: 0,
+        humidity: 0,
+        wind: 0,
+    };
 
-    // 溫度評分 (最佳跑步溫度 10-20°C)
-    if (temp < 5) {
+    // 溫度評分（細化分段，最佳區 12-18°C）
+    if (temp <= 1) {
         score -= 30;
+        penalties.temperature += 30;
+        issues.push('氣溫極端偏低');
+    } else if (temp <= 3) {
+        score -= 26;
+        penalties.temperature += 26;
         issues.push('氣溫過低');
-    } else if (temp < 10) {
-        score -= 15;
+    } else if (temp <= 5) {
+        score -= 20;
+        penalties.temperature += 20;
         issues.push('氣溫偏低');
-    } else if (temp > 28) {
-        score -= 30;
-        issues.push('氣溫過高');
-    } else if (temp > 23) {
-        score -= 15;
+    } else if (temp <= 7) {
+        score -= 14;
+        penalties.temperature += 14;
+        issues.push('氣溫微偏低');
+    } else if (temp <= 9) {
+        score -= 8;
+        penalties.temperature += 8;
+        issues.push('氣溫稍低');
+    } else if (temp <= 11) {
+        score -= 4;
+        penalties.temperature += 4;
+    } else if (temp <= 18) {
+        // 最佳區間，不扣分
+    } else if (temp <= 21) {
+        score -= 4;
+        penalties.temperature += 4;
+    } else if (temp <= 24) {
+        score -= 8;
+        penalties.temperature += 8;
+        issues.push('氣溫稍高');
+    } else if (temp <= 27) {
+        score -= 14;
+        penalties.temperature += 14;
+        issues.push('氣溫微偏高');
+    } else if (temp <= 30) {
+        score -= 20;
+        penalties.temperature += 20;
         issues.push('氣溫偏高');
+    } else if (temp <= 33) {
+        score -= 26;
+        penalties.temperature += 26;
+        issues.push('氣溫過高');
+    } else {
+        score -= 30;
+        penalties.temperature += 30;
+        issues.push('氣溫極端偏高');
     }
 
-    // 空氣品質評分
-    if (aqi) {
+    // 空氣品質評分（以 PM2.5 為主，AQI 僅做提示）
+    const hasPm25 = typeof pm25 === 'number' && Number.isFinite(pm25);
+    const aqiText = aqi
+        ? {
+              1: '良好',
+              2: '普通',
+              3: '敏感族群不健康',
+              4: '不健康',
+              5: '非常不健康',
+          }[aqi] || '未知'
+        : '無資料';
+
+    if (hasPm25) {
+        const pm = pm25 as number;
+        if (pm <= 12) {
+            // 不扣分
+        } else if (pm <= 23) {
+            score -= 13;
+            penalties.airQuality += 13;
+        } else if (pm <= 35.4) {
+            score -= 23;
+            penalties.airQuality += 23;
+            issues.push('PM2.5 偏高');
+        } else if (pm <= 41) {
+            score -= 34;
+            penalties.airQuality += 34;
+            issues.push('PM2.5 對敏感族群不友善');
+        } else if (pm <= 54.4) {
+            score -= 47;
+            penalties.airQuality += 47;
+            issues.push('PM2.5 不佳');
+        } else if (pm <= 70) {
+            score -= 60;
+            penalties.airQuality += 60;
+            issues.push('PM2.5 偏差');
+        } else {
+            score -= 72;
+            penalties.airQuality += 72;
+            issues.push('PM2.5 很差');
+        }
+
+        airQualityHint = aqi ? `PM2.5 ${pm.toFixed(1)} μg/m³｜AQI ${aqi}（${aqiText}）` : `PM2.5 ${pm.toFixed(1)} μg/m³｜AQI 無資料`;
+    } else if (aqi) {
         if (aqi >= 4) {
-            score -= 40;
+            score -= 72;
+            penalties.airQuality += 72;
             issues.push('空氣品質差');
         } else if (aqi >= 3) {
-            score -= 25;
+            score -= 46;
+            penalties.airQuality += 46;
             issues.push('空氣品質普通');
         } else if (aqi >= 2) {
-            score -= 10;
+            score -= 21;
+            penalties.airQuality += 21;
         }
+        airQualityHint = `PM2.5 無資料｜AQI ${aqi}（${aqiText}）`;
     }
 
     // 濕度評分
     if (humidity > 80) {
         score -= 20;
+        penalties.humidity += 20;
         issues.push('濕度過高');
     } else if (humidity > 70) {
         score -= 10;
+        penalties.humidity += 10;
         issues.push('濕度偏高');
     }
 
     // 風速評分
     if (windSpeed > 30) {
         score -= 15;
+        penalties.wind += 15;
         issues.push('風速過強');
     } else if (windSpeed > 20) {
         score -= 8;
+        penalties.wind += 8;
     }
 
     score = Math.max(0, Math.min(100, score));
 
-    if (score >= 80) return { level: 'excellent', text: '絕佳', color: 'from-green-500 to-emerald-600', emoji: '🏃‍♂️💨', issues };
-    if (score >= 60) return { level: 'good', text: '良好', color: 'from-blue-500 to-cyan-600', emoji: '🏃‍♂️', issues };
-    if (score >= 40) return { level: 'fair', text: '尚可', color: 'from-yellow-500 to-orange-500', emoji: '🚶‍♂️', issues };
-    return { level: 'poor', text: '不佳', color: 'from-red-500 to-pink-600', emoji: '⚠️', issues };
+    if (score >= 80) return { level: 'excellent', text: '絕佳', color: 'from-green-500 to-emerald-600', emoji: '🏃‍♂️💨', issues, score, penalties, airQualityHint };
+    if (score >= 60) return { level: 'good', text: '良好', color: 'from-blue-500 to-cyan-600', emoji: '🏃‍♂️', issues, score, penalties, airQualityHint };
+    if (score >= 40) return { level: 'fair', text: '尚可', color: 'from-yellow-500 to-orange-500', emoji: '🚶‍♂️', issues, score, penalties, airQualityHint };
+    return { level: 'poor', text: '不佳', color: 'from-red-500 to-pink-600', emoji: '⚠️', issues, score, penalties, airQualityHint };
 };
 
 // 跑者指標指南卡片組件
@@ -414,6 +513,15 @@ function WeatherChecker() {
         return `https://openweathermap.org/img/wn/${iconCode}@4x.png`;
     };
 
+    const getTrendIconCode = (iconCode: string, isoTime: string) => {
+        const hour = new Date(isoTime).getHours();
+        const isNight = hour >= 18 || hour < 6;
+        if (isNight && /d$/.test(iconCode)) {
+            return iconCode.replace(/d$/, 'n');
+        }
+        return iconCode;
+    };
+
     const getAqiColor = (aqi: number) => {
         switch (aqi) {
             case 1:
@@ -436,6 +544,17 @@ function WeatherChecker() {
             hour: '2-digit',
             minute: '2-digit',
         });
+    };
+
+    const formatHourMinute = (isoString: string) => {
+        const hour = new Date(isoString).toLocaleTimeString('zh-TW', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+        });
+
+        // 強制用整點格式顯示（例如 14:00）
+        return hour.replace(/:\d{2}$/, ':00');
     };
 
     const getDisplayLocation = (data: WeatherData) => {
@@ -497,7 +616,7 @@ function WeatherChecker() {
         };
     };
 
-    const runningCondition = weather ? getRunningCondition(weather.temperature, weather.airQuality?.aqi, weather.humidity, weather.windSpeed) : null;
+    const runningCondition = weather ? getRunningCondition(weather.temperature, weather.airQuality?.aqi, weather.airQuality?.components.pm2_5, weather.humidity, weather.windSpeed) : null;
     const locationDisplay = weather ? (confirmedLocation ? { title: confirmedLocation.district, subtitle: confirmedLocation.city || '' } : getDisplayLocation(weather)) : { title: '', subtitle: '' };
 
     const getFavoriteId = (district: string, city?: string) => {
@@ -576,6 +695,14 @@ function WeatherChecker() {
 
             {/* 搜尋列 */}
             <form onSubmit={handleSearchSubmit} className="relative mb-4 lg:mb-5 flex gap-2 z-0 lg:z-50 max-w-3xl">
+                <button
+                    type="button"
+                    onClick={handleGetCurrentLocation}
+                    className="px-4 bg-blue-500 text-white rounded-2xl shadow-sm hover:bg-blue-600 active:scale-95 transition-all flex items-center justify-center shrink-0"
+                    title="定位"
+                >
+                    <MapPin size={24} />
+                </button>
                 <div className="flex-1 relative">
                     <div className="flex items-center bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3">
                         <input
@@ -591,34 +718,26 @@ function WeatherChecker() {
                         </button>
                     </div>
                 </div>
-                <button
-                    type="button"
-                    onClick={handleGetCurrentLocation}
-                    className="px-4 bg-blue-500 text-white rounded-2xl shadow-sm hover:bg-blue-600 active:scale-95 transition-all flex items-center justify-center shrink-0"
-                    title="定位"
-                >
-                    <MapPin size={24} />
-                </button>
             </form>
 
             {favorites.length > 0 && (
                 <div className="mb-4 max-w-4xl">
                     <div className="flex items-center gap-2 mb-2 px-1">
-                        <Heart size={14} className="text-rose-600 dark:text-rose-300" />
+                        <Heart size={14} className="text-rose-600 dark:text-white dark:fill-white/10 dark:drop-shadow-[0_0_1px_rgba(255,255,255,0.6)]" />
                         <p className="text-xs font-semibold tracking-wide text-gray-600 dark:text-gray-300">最愛地點</p>
                     </div>
                     <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
                         {favorites.map((favorite) => (
                             <div
                                 key={favorite.id}
-                                className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 shadow-sm"
+                                className="inline-flex items-center rounded-full border border-gray-300 dark:border-slate-500/70 bg-white dark:bg-slate-800/85 text-gray-800 dark:text-gray-100 shadow-sm dark:shadow-black/30"
                             >
                                 <button
                                     type="button"
                                     onClick={() => {
                                         void handleFavoriteQuickSelect(favorite);
                                     }}
-                                    className="px-3 py-1.5 text-xs font-medium whitespace-nowrap rounded-l-full transition-colors text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                    className="px-3 py-1.5 text-xs font-medium whitespace-nowrap rounded-l-full transition-colors text-gray-800 dark:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-700/80"
                                     title={`快速查詢 ${favorite.city ? `${favorite.city}${favorite.district}` : favorite.district}`}
                                 >
                                     {favorite.city ? `${favorite.city}${favorite.district}` : favorite.district}
@@ -626,7 +745,7 @@ function WeatherChecker() {
                                 <button
                                     type="button"
                                     onClick={() => removeFavorite(favorite.id)}
-                                    className="pr-2 pl-2 py-1.5 border-l border-gray-300 dark:border-gray-500 text-gray-500 hover:text-gray-700 dark:text-gray-300 dark:hover:text-gray-100 transition-colors"
+                                    className="pr-2 pl-2 py-1.5 border-l border-gray-300 dark:border-slate-500/80 text-gray-500 hover:text-gray-700 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-700/80 rounded-r-full transition-colors"
                                     aria-label={`移除最愛 ${favorite.city ? `${favorite.city}${favorite.district}` : favorite.district}`}
                                 >
                                     <X size={12} />
@@ -645,7 +764,7 @@ function WeatherChecker() {
                         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5">
                             <div className="lg:col-span-7 xl:col-span-8 space-y-4">
                                 {runningCondition && (
-                                    <div className={`bg-gradient-to-r ${runningCondition.color} rounded-3xl p-5 lg:p-6 text-white shadow-2xl relative overflow-hidden`}>
+                                    <div className={`bg-gradient-to-r ${runningCondition.color} rounded-3xl p-5 lg:p-6 text-white relative overflow-hidden`}>
                                         <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-3xl -mr-8 -mt-8" />
                                         <div className="absolute bottom-0 left-0 w-24 h-24 bg-black/10 rounded-full blur-2xl -ml-6 -mb-6" />
 
@@ -672,50 +791,66 @@ function WeatherChecker() {
                                                 </p>
                                             </div>
 
-                                            <div className="mt-5 mb-5 lg:mt-6 lg:mb-6">
-                                                <p className="text-xs font-bold opacity-80 uppercase tracking-widest mb-2 ml-1">跑步狀態</p>
-                                                <p className="text-5xl sm:text-6xl font-black tracking-tighter drop-shadow-md leading-none">{runningCondition.text}</p>
-                                            </div>
-
-                                            <div className="mt-4 pt-3 border-t border-white/20 flex flex-col gap-3">
-                                                {runningCondition.issues.length > 0 ? (
-                                                    <div>
-                                                        <p className="text-xs font-bold mb-2 opacity-90 flex items-center gap-1">⚠️ 注意事項</p>
-                                                        <div className="flex flex-wrap gap-1.5">
-                                                            {runningCondition.issues.map((issue, idx) => (
-                                                                <span key={idx} className="bg-white/25 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold shadow-sm border border-white/10">
-                                                                    {issue}
-                                                                </span>
-                                                            ))}
-                                                        </div>
+                                            <div className="mt-5 mb-2 lg:mt-6 lg:mb-3">
+                                                <p className="text-xs font-bold opacity-80 uppercase tracking-widest mb-2 ml-1">跑步狀態與評分</p>
+                                                <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+                                                    <p className="text-5xl sm:text-6xl font-black tracking-tighter drop-shadow-md leading-none">{runningCondition.text}</p>
+                                                    <div className="inline-flex items-end gap-1.5 px-3 py-2 rounded-2xl bg-white/20 border border-white/25 backdrop-blur-sm shadow-lg self-start sm:self-auto">
+                                                        <span className="text-[11px] font-bold text-white/90 mb-1">綜合分數</span>
+                                                        <span className="text-4xl sm:text-5xl font-black tracking-tight leading-none text-white">{runningCondition.score}</span>
+                                                        <span className="text-sm font-bold text-white/90 mb-1">/100</span>
                                                     </div>
-                                                ) : (
-                                                    <p className="text-sm font-bold opacity-90 flex items-center gap-1">✨ 天氣狀況良好，享受跑步！</p>
-                                                )}
-                                                {weather.source && <p className="text-[10px] text-white/60 text-right mt-1 font-medium">資料來源：{weather.source}</p>}
+                                                </div>
+                                                <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold text-white/95">
+                                                    {[
+                                                        { label: '溫度佳', penalty: runningCondition.penalties.temperature },
+                                                        { label: 'PM2.5 佳', penalty: runningCondition.penalties.airQuality },
+                                                        { label: '濕度佳', penalty: runningCondition.penalties.humidity },
+                                                        { label: '風速佳', penalty: runningCondition.penalties.wind },
+                                                    ]
+                                                        .filter((item) => item.penalty === 0)
+                                                        .map((item) => (
+                                                            <span key={item.label} className="px-2.5 py-1 rounded-full bg-emerald-400/25 border border-emerald-200/35 text-white shadow-sm">
+                                                                ✓ {item.label}
+                                                            </span>
+                                                        ))}
+                                                </div>
+                                                <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-white/95">
+                                                    <div className="rounded-xl border border-white/20 bg-white/15 px-3 py-2">
+                                                        <p className="text-[10px] font-semibold text-white/80">當前氣溫</p>
+                                                        <p className="text-2xl font-black leading-tight">{weather.temperature}°C</p>
+                                                        <p className="text-[10px] text-white/70 mt-0.5">體感 {weather.feelsLike}°C</p>
+                                                    </div>
+                                                    <div className="rounded-xl border border-white/20 bg-white/15 px-3 py-2 sm:col-span-2">
+                                                        <p className="text-[10px] font-semibold text-white/80">空氣指標</p>
+                                                        <p className="text-xs font-semibold mt-1">{runningCondition.airQualityHint}</p>
+                                                    </div>
+                                                </div>
+                                                {weather.source && <p className="text-[10px] text-white/60 text-right mt-2 font-medium">資料來源：{weather.source}</p>}
                                             </div>
                                         </div>
                                     </div>
                                 )}
 
-                                <div className="bg-gradient-to-br from-slate-700 via-slate-600 to-slate-700 dark:from-slate-800 dark:via-slate-700 dark:to-slate-800 rounded-3xl p-5 lg:p-6 text-white shadow-xl relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 w-40 h-40 bg-white/5 rounded-full blur-2xl -mr-12 -mt-12" />
-                                    <div className="flex items-center gap-4 relative z-10 w-full justify-between">
-                                        <div className="flex items-center gap-4">
-                                            <img src={getWeatherIconUrl(weather.icon)} alt={weather.description} className="w-20 h-20 drop-shadow-lg" />
-                                            <div className="flex flex-col">
-                                                <span className="text-5xl sm:text-6xl font-black tracking-tighter leading-none">{weather.temperature}°</span>
-                                                <span className="text-lg font-medium opacity-90 capitalize mt-1">{weather.description}</span>
+                                {runningCondition && (
+                                    <div className="rounded-2xl border border-amber-200/70 dark:border-amber-700/50 bg-amber-50/90 dark:bg-amber-900/20 p-4 shadow-sm">
+                                        <p className="text-xs font-black text-amber-900 dark:text-amber-200 mb-2 flex items-center gap-1">⚠️ 注意事項</p>
+                                        {runningCondition.issues.length > 0 ? (
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {runningCondition.issues.map((issue, idx) => (
+                                                    <span
+                                                        key={idx}
+                                                        className="bg-white/80 dark:bg-amber-800/40 border border-amber-200 dark:border-amber-700 px-3 py-1 rounded-full text-xs font-bold text-amber-900 dark:text-amber-100"
+                                                    >
+                                                        {issue}
+                                                    </span>
+                                                ))}
                                             </div>
-                                        </div>
-                                        <div className="text-right">
-                                            <div className="bg-white/15 backdrop-blur-sm px-3 py-1.5 rounded-xl">
-                                                <p className="text-[10px] opacity-70 uppercase tracking-wide">體感溫度</p>
-                                                <p className="text-2xl font-bold">{weather.feelsLike}°</p>
-                                            </div>
-                                        </div>
+                                        ) : (
+                                            <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">✨ 天氣狀況良好，享受跑步！</p>
+                                        )}
                                     </div>
-                                </div>
+                                )}
 
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                                     <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/40 dark:to-cyan-900/40 p-4 rounded-2xl shadow-sm border border-blue-200/60 dark:border-blue-700 flex flex-col items-center justify-center hover:-translate-y-1 hover:shadow-md transition-all">
@@ -742,16 +877,51 @@ function WeatherChecker() {
                                         <span className="text-2xl font-black text-gray-900 dark:text-white mt-1">{weather.airQuality?.components.pm2_5.toFixed(1)}</span>
                                         <span className="text-[10px] text-gray-600 dark:text-gray-300 mt-1 font-medium">{(weather.airQuality?.components.pm2_5 || 0) > 35 ? '⚠️ 不佳' : '✓ 良好'}</span>
                                     </div>
-                                    <div className="bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-900/40 dark:to-red-900/40 p-4 rounded-2xl shadow-sm border border-orange-200/60 dark:border-orange-700 flex flex-col items-center justify-center hover:-translate-y-1 hover:shadow-md transition-all">
-                                        <Eye className="text-orange-700 dark:text-orange-300 mb-2" size={28} />
-                                        <span className="text-xs text-gray-700 dark:text-gray-300 font-semibold uppercase tracking-wide">能見度</span>
+                                    <div className="bg-gradient-to-br from-sky-50 to-blue-50 dark:from-sky-900/40 dark:to-blue-900/40 p-4 rounded-2xl shadow-sm border border-sky-200/70 dark:border-sky-700/80 flex flex-col items-center justify-center hover:-translate-y-1 hover:shadow-md transition-all">
+                                        <CloudRain className="text-sky-700 dark:text-sky-300 mb-2" size={28} />
+                                        <span className="text-xs text-gray-700 dark:text-gray-300 font-semibold uppercase tracking-wide">降雨機率</span>
                                         <span className="text-2xl font-black text-gray-900 dark:text-white mt-1">
-                                            {(weather.visibility / 1000).toFixed(1)}
-                                            <span className="text-base font-normal ml-0.5">km</span>
+                                            {typeof weather.precipitationProbability === 'number' ? weather.precipitationProbability : '--'}
+                                            <span className="text-base font-normal ml-0.5">%</span>
                                         </span>
-                                        <span className="text-[10px] text-gray-600 dark:text-gray-300 mt-1 font-medium">{weather.visibility > 5000 ? '✓ 清晰' : '⚠️ 霧霾'}</span>
+                                        <span className="text-[10px] text-gray-600 dark:text-gray-300 mt-1 font-medium">
+                                            {typeof weather.precipitationProbability !== 'number'
+                                                ? '資料更新中'
+                                                : weather.precipitationProbability >= 60
+                                                  ? '⚠️ 建議備雨具'
+                                                  : weather.precipitationProbability >= 30
+                                                    ? '☁️ 可能有雨'
+                                                    : '✓ 降雨機率低'}
+                                        </span>
                                     </div>
                                 </div>
+
+                                {weather.temperatureTrend6h && weather.temperatureTrend6h.length > 0 && (
+                                    <div className="bg-white/80 dark:bg-gray-800/70 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 shadow-sm">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h3 className="text-sm font-black text-gray-800 dark:text-gray-200 tracking-wide">未來六小時氣溫變化</h3>
+                                            <span className="text-[10px] text-gray-500 dark:text-gray-400">每 3 小時更新</span>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                                            {weather.temperatureTrend6h.map((point, index) => (
+                                                <div
+                                                    key={`${point.time}-${index}`}
+                                                    className="rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/20 border border-amber-200/70 dark:border-amber-700/50 px-3 py-2"
+                                                >
+                                                    <div className="flex items-center justify-between gap-2 lg:block lg:text-center">
+                                                        <p className="text-xs text-gray-600 dark:text-gray-300 font-medium shrink-0 lg:mb-1">{formatHourMinute(point.time)}</p>
+                                                        <img
+                                                            src={getWeatherIconUrl(getTrendIconCode(point.icon, point.time))}
+                                                            alt={point.description}
+                                                            className="w-9 h-9 shrink-0 lg:mx-auto lg:my-0.5"
+                                                        />
+                                                        <p className="text-xl font-black text-gray-900 dark:text-white leading-tight shrink-0">{point.temperature}°C</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="lg:col-span-5 xl:col-span-4 space-y-4">
