@@ -17,5 +17,7 @@
     ],
     "author": "",
     "license": "ISC",
-    "dependencies": {}
+    "devDependencies": {
+        "@fission-ai/openspec": "^1.2.0"
+    }
 }
